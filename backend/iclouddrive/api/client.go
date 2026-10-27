@@ -29,7 +29,7 @@ type endpoints struct{ base, setup, auth string }
 
 func endpointsForDomain(domain string) endpoints {
 	if strings.EqualFold(domain, "iCloud.com.cn") {
-		return endpoints{"https://www.icloud.com.cn", "https://setup.icloud.com.cn/setup/ws/1", "https://idmsa.apple.com.cn/appleauth/auth"}
+		return endpoints{"https://www.icloud.com.cn", "https://setup.icloud.com.cn/setup/ws/1", "https://idmsa.apple.com/appleauth/auth"}
 	}
 	return endpoints{baseEndpoint, setupEndpoint, authEndpoint}
 }

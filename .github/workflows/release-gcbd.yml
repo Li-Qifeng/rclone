@@ -1,0 +1,125 @@
+name: Build & Release (GCBD)
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Release Tag (e.g. v1.75.2-gcbd)'
+        required: true
+        default: 'v1.75.2-gcbd'
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build (${{ matrix.goos }}/${{ matrix.goarch }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: darwin
+            goarch: arm64
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache: false
+
+      - name: Determine Version
+        id: vars
+        run: |
+          if [ -n "${{ github.event.inputs.tag_name }}" ]; then
+            TAG="${{ github.event.inputs.tag_name }}"
+          elif [ -n "${{ github.ref_name }}" ]; then
+            TAG="${{ github.ref_name }}"
+          else
+            TAG="v1.75.2-gcbd"
+          fi
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+
+      - name: Compile rclone
+        run: |
+          TAG="${{ steps.vars.outputs.tag }}"
+          OUTPUT_DIR="rclone-${TAG}-${{ matrix.goos }}-${{ matrix.goarch }}"
+          mkdir -p "${OUTPUT_DIR}"
+          
+          echo "Building for ${{ matrix.goos }}/${{ matrix.goarch }} (Version: ${TAG})..."
+          CGO_ENABLED=0 GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} go build -v -trimpath \
+            -ldflags "-s -w -X github.com/rclone/rclone/fs.Version=${TAG}" \
+            -o "${OUTPUT_DIR}/rclone"
+            
+          tar -czvf "${OUTPUT_DIR}.tar.gz" -C "${OUTPUT_DIR}" rclone
+          sha256sum "${OUTPUT_DIR}.tar.gz" > "${OUTPUT_DIR}.tar.gz.sha256"
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rclone-${{ steps.vars.outputs.tag }}-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: |
+            rclone-*.tar.gz
+            rclone-*.tar.gz.sha256
+
+  release:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Determine Version
+        id: vars
+        run: |
+          if [ -n "${{ github.event.inputs.tag_name }}" ]; then
+            TAG="${{ github.event.inputs.tag_name }}"
+          elif [ -n "${{ github.ref_name }}" ]; then
+            TAG="${{ github.ref_name }}"
+          else
+            TAG="v1.75.2-gcbd"
+          fi
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+
+      - name: Create / Update GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.vars.outputs.tag }}
+          name: "Rclone (${{ steps.vars.outputs.tag }}) - 中国大陆/云上贵州 GCBD 修复版"
+          body: |
+            ### Rclone 中国大陆 (云上贵州 GCBD) 修复版
+            
+            基于官方 `rclone v1.75.2` 及社区 PR #9995 构建，修复了中国大陆区域 iCloud 账号鉴权与 PCS 令牌获取逻辑。
+            
+            #### 包含架构：
+            - `linux/amd64` (常规 Linux / NAS x86_64)
+            - `linux/arm64` (甲骨文 ARM / 树莓派 / 飞腾等)
+            - `darwin/arm64` (Apple Silicon Mac)
+            
+            #### 快速单行安装 (Linux)：
+            ```bash
+            # AMD64 (NAS):
+            curl -fsSL https://github.com/Li-Qifeng/rclone/releases/download/${{ steps.vars.outputs.tag }}/rclone-${{ steps.vars.outputs.tag }}-linux-amd64.tar.gz | tar -xz && sudo install -m 755 rclone /usr/bin/rclone && rm rclone
+            
+            # ARM64 (VPS):
+            curl -fsSL https://github.com/Li-Qifeng/rclone/releases/download/${{ steps.vars.outputs.tag }}/rclone-${{ steps.vars.outputs.tag }}-linux-arm64.tar.gz | tar -xz && sudo install -m 755 rclone /usr/bin/rclone && rm rclone
+            ```
+          files: release-assets/*
+          draft: false
+          prerelease: false
